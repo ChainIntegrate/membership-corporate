@@ -1,0 +1,30 @@
+{
+  "name": "chainintegrate-membership-corporate",
+  "version": "1.0.0",
+  "description": "NFT membership soulbound (LSP8) corporate con tier Bronze/Silver/Gold aggiornabile e sospensione/riattivazione (senza burn). Variante corporate del repo chainintegrate-membership (private), pensata per UP di aziende/organizzazioni.",
+  "main": "hardhat.config.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ChainIntegrate/chainintegrate-membership-corporate.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs",
+  "bugs": {
+    "url": "https://github.com/ChainIntegrate/chainintegrate-membership-corporate/issues"
+  },
+  "homepage": "https://github.com/ChainIntegrate/chainintegrate-membership-corporate#readme",
+  "devDependencies": {
+    "@nomicfoundation/hardhat-toolbox": "^5.0.0",
+    "dotenv": "^17.4.2",
+    "hardhat": "^2.29.0"
+  },
+  "dependencies": {
+    "@lukso/lsp4-contracts": "^0.17.3",
+    "@lukso/lsp8-contracts": "^0.18.1"
+  }
+}

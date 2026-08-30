@@ -1,0 +1,389 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>ChainIntegrate Membership Corporate — admin</title>
+
+<script src="https://cdn.jsdelivr.net/npm/ethers@6.13.4/dist/ethers.umd.min.js"></script>
+<script src="config.js"></script>
+
+<style>
+  body{ font-family:monospace; background:#10181A; color:#EDE7DD; max-width:640px; margin:2rem auto; padding:1rem; }
+  h1{ font-size:1.1rem; }
+  button{ padding:0.6rem 1rem; margin:0.4rem 0; cursor:pointer; }
+  .row{ margin:1rem 0; }
+  .log{ background:#1A2528; padding:0.75rem; border-radius:6px; white-space:pre-wrap; font-size:0.8rem; max-height:300px; overflow:auto; }
+  input[type=file], input[type=text], input[type=number], select{ color:#EDE7DD; background:#1A2528; border:1px solid #2C3D40; padding:0.4rem; }
+  .warn{ color:#E0B84B; }
+</style>
+</head>
+<body>
+
+<h1>ChainIntegrate Membership Corporate — admin</h1>
+<p>Pagina non collegata a nessuna navigazione pubblica. Mint, aggiornamento tier, sospensione e riattivazione: solo l'owner del contratto (ChainIntegrate) può usarla — protezione reale on-chain, non solo lato UI.</p>
+
+<div class="row">
+  <button id="btn-connect">Connect UP</button>
+  <span id="status"></span>
+</div>
+
+<hr style="border-color:#2C3D40; margin:2rem 0;" />
+
+<h1>Set collection metadata</h1>
+<p>Da fare una tantum: nome/icona/descrizione della collezione visibili su universaleverything.io a livello generale, separati dai badge dei singoli membri.</p>
+<div class="row">
+  <label>Icona collezione (quadrata, idealmente ≤800px): </label><br/>
+  <input type="file" id="f-collection-icon" accept="image/*" />
+</div>
+<div class="row">
+  <label>Banner collezione (opzionale, es. 1920x600): </label><br/>
+  <input type="file" id="f-collection-banner" accept="image/*" />
+</div>
+<div class="row">
+  <button id="btn-set-collection-metadata" disabled>Set collection metadata</button>
+</div>
+
+<hr style="border-color:#2C3D40; margin:2rem 0;" />
+
+<h1>Mint nuova membership</h1>
+<div class="row">
+  <label>Indirizzo UP dell'azienda: </label><br/>
+  <input type="text" id="f-address" placeholder="0x..." style="width:100%;" />
+</div>
+<div class="row">
+  <label>Tier: </label><br/>
+  <select id="f-tier">
+    <option value="1">Bronze</option>
+    <option value="2">Silver</option>
+    <option value="3">Gold</option>
+  </select>
+  <p style="font-size:0.75rem; color:#9AA6A5;">Il badge viene preso automaticamente da bronze.png/silver.png/gold.png sul server.</p>
+</div>
+<div class="row">
+  <button id="btn-mint" disabled>Mint membership</button>
+</div>
+
+<hr style="border-color:#2C3D40; margin:2rem 0;" />
+
+<h1>Aggiorna tier esistente</h1>
+<div class="row">
+  <label>Token ID (numero): </label><br/>
+  <input type="number" id="f-token-id" min="1" step="1" style="width:120px;" />
+</div>
+<div class="row">
+  <label>Nuovo tier: </label><br/>
+  <select id="f-new-tier">
+    <option value="1">Bronze</option>
+    <option value="2">Silver</option>
+    <option value="3">Gold</option>
+  </select>
+</div>
+<div class="row">
+  <button id="btn-set-tier" disabled>Aggiorna tier</button>
+</div>
+
+<hr style="border-color:#2C3D40; margin:2rem 0;" />
+
+<h1>Sospendi / riattiva</h1>
+<p class="warn">Sospendere NON è un burn: il tier resta registrato, tierOf() torna a 0 finché non si riattiva. L'azienda sospesa non può mintarsi una seconda membership per aggirare lo stop.</p>
+<div class="row">
+  <label>Indirizzo UP dell'azienda: </label><br/>
+  <input type="text" id="f-status-address" placeholder="0x..." style="width:100%;" />
+  <button id="btn-check-status" disabled>Verifica stato</button>
+</div>
+<div class="row" id="status-result" style="font-size:0.85rem;"></div>
+<div class="row">
+  <label>Token ID su cui agire (numero): </label><br/>
+  <input type="number" id="f-suspend-token-id" min="1" step="1" style="width:120px;" />
+</div>
+<div class="row">
+  <button id="btn-suspend" disabled>Sospendi</button>
+  <button id="btn-reactivate" disabled>Riattiva</button>
+</div>
+
+<div class="log" id="log">Pronto.</div>
+
+<script type="module">
+import { ERC725 } from "https://esm.sh/@erc725/erc725.js@0.28.2";
+
+const logEl = document.getElementById("log");
+function log(msg){ logEl.textContent += "\n" + msg; logEl.scrollTop = logEl.scrollHeight; }
+
+let provider, signer, address, contract;
+
+const schema = [{
+  name: "LSP4Metadata",
+  key: LSP4_METADATA_KEY,
+  keyType: "Singleton",
+  valueType: "bytes",
+  valueContent: "VerifiableURI"
+}];
+
+async function uploadImage(file, filename){
+  const formData = new FormData();
+  formData.append("image", file, filename);
+  const res = await fetch("/api/pin-file", { method: "POST", body: formData });
+  if(!res.ok) throw new Error("upload immagine fallito: " + (await res.text()));
+  const data = await res.json();
+  return data.cid;
+}
+
+async function imageEntry(file, filename){
+  const buffer = await file.arrayBuffer();
+  const hash = ethers.keccak256(new Uint8Array(buffer));
+  const bitmap = await createImageBitmap(file);
+  const cid = await uploadImage(file, filename);
+  return {
+    width: bitmap.width,
+    height: bitmap.height,
+    url: `ipfs://${cid}`,
+    verification: { method: "keccak256(bytes)", data: hash }
+  };
+}
+
+// Il badge di ogni tier è già sul server (bronze.png/silver.png/gold.png,
+// nella stessa cartella di admin.html) — non serve caricarlo ogni volta,
+// lo prendiamo direttamente da lì e lo pinniamo su Pinata al volo.
+const TIER_BADGE_FILE = { 1: "bronze.png", 2: "silver.png", 3: "gold.png" };
+
+async function fetchTierBadgeBlob(tierNumber){
+  const filename = TIER_BADGE_FILE[tierNumber];
+  const res = await fetch(`/${filename}`);
+  if(!res.ok) throw new Error(`${filename} non trovato sul server — verifica che sia stato caricato in frontend/.`);
+  return { blob: await res.blob(), filename };
+}
+
+async function buildAndUploadMetadata(tierNumber){
+  const { blob, filename } = await fetchTierBadgeBlob(tierNumber);
+  const icon = await imageEntry(blob, filename);
+  const metadataJson = {
+    LSP4Metadata: {
+      name: `ChainIntegrate Membership Corporate — ${TIER_NAMES[tierNumber]}`,
+      description: "IT: Badge membership corporate ChainIntegrate.\n\nEN: ChainIntegrate corporate membership badge.",
+      links: [{ title: "Website", url: "https://chainintegrate.it" }],
+      icon: [icon],
+      images: [[icon]],
+      assets: [],
+      attributes: [{ key: "Tier", value: TIER_NAMES[tierNumber], type: "string" }]
+    }
+  };
+
+  const jsonRes = await fetch("/api/pin-json", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(metadataJson)
+  });
+  if(!jsonRes.ok) throw new Error("upload JSON fallito");
+  const { cid } = await jsonRes.json();
+
+  const encoded = ERC725.encodeData([{
+    keyName: "LSP4Metadata",
+    value: { json: metadataJson, url: `ipfs://${cid}` }
+  }], schema);
+
+  return encoded.values[0];
+}
+
+function toTokenIdHex(tokenIdNum){
+  return ethers.zeroPadValue(ethers.toBeHex(BigInt(tokenIdNum)), 32);
+}
+
+document.getElementById("btn-connect").addEventListener("click", async () => {
+  const injected = window.lukso || window.ethereum;
+  if(!injected){ log("Nessuna UP rilevata."); return; }
+
+  provider = new ethers.BrowserProvider(injected);
+  await injected.request({ method: "eth_requestAccounts" });
+  signer = await provider.getSigner();
+  address = await signer.getAddress();
+  const network = await provider.getNetwork();
+  const chainId = Number(network.chainId);
+  const netConfig = NETWORKS[chainId];
+  if(!netConfig){ log("Rete non supportata: " + chainId); return; }
+  if(netConfig.contractAddress === "0x0000000000000000000000000000000000000000"){
+    log("Indirizzo contratto non ancora configurato in config.js per questa rete.");
+    return;
+  }
+
+  contract = new ethers.Contract(netConfig.contractAddress, MEMBERSHIP_ABI, signer);
+  const owner = await contract.owner();
+
+  document.getElementById("status").textContent = `${address} (rete ${chainId})`;
+  log(`Connesso: ${address}`);
+  log(`Owner contratto: ${owner}`);
+  log(owner.toLowerCase() === address.toLowerCase()
+    ? "✓ Sei l'owner, puoi procedere."
+    : "✗ NON sei l'owner: le transazioni falliranno on-chain se procedi.");
+
+  document.getElementById("btn-mint").disabled = false;
+  document.getElementById("btn-set-tier").disabled = false;
+  document.getElementById("btn-set-collection-metadata").disabled = false;
+  document.getElementById("btn-check-status").disabled = false;
+  document.getElementById("btn-suspend").disabled = false;
+  document.getElementById("btn-reactivate").disabled = false;
+});
+
+document.getElementById("btn-set-collection-metadata").addEventListener("click", async () => {
+  try{
+    const iconFile = document.getElementById("f-collection-icon").files[0];
+    const bannerFile = document.getElementById("f-collection-banner").files[0];
+    if(!iconFile){ log("Serve un'icona."); return; }
+
+    log("Upload icona collezione su Pinata...");
+    const icon = await imageEntry(iconFile);
+    log("Icona caricata: " + icon.url);
+
+    let images = [[icon]];
+    let backgroundImage = [];
+    if(bannerFile){
+      log("Upload banner su Pinata...");
+      const banner = await imageEntry(bannerFile);
+      images = [[banner]];
+      backgroundImage = [banner];
+      log("Banner caricato: " + banner.url);
+    }
+
+    const metadataJson = {
+      LSP4Metadata: {
+        name: "ChainIntegrate Membership Corporate",
+        description: "IT: Membership corporate ChainIntegrate a livelli (Bronze/Silver/Gold), soulbound, sospendibile, valida su tutti i progetti dell'ecosistema.\n\nEN: Tiered ChainIntegrate corporate membership (Bronze/Silver/Gold), soulbound, suspendable, valid across all ecosystem projects.",
+        links: [{ title: "Website", url: "https://chainintegrate.it" }],
+        icon: [icon],
+        images,
+        backgroundImage,
+        assets: [],
+        attributes: []
+      }
+    };
+
+    log("Upload JSON metadata su Pinata...");
+    const jsonRes = await fetch("/api/pin-json", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(metadataJson)
+    });
+    if(!jsonRes.ok) throw new Error("upload JSON fallito");
+    const { cid } = await jsonRes.json();
+    log("JSON caricato: ipfs://" + cid);
+
+    const encoded = ERC725.encodeData([{
+      keyName: "LSP4Metadata",
+      value: { json: metadataJson, url: `ipfs://${cid}` }
+    }], schema);
+
+    log("Invio setData alla UP per la firma...");
+    const tx = await contract.setData(encoded.keys[0], encoded.values[0]);
+    log("Transazione inviata: " + tx.hash);
+    await tx.wait();
+    log("✓ Fatto. Metadata di collezione impostata.");
+  }catch(err){
+    console.error(err);
+    log("✗ Errore: " + (err.message || err));
+  }
+});
+
+document.getElementById("btn-mint").addEventListener("click", async () => {
+  try{
+    const memberAddress = document.getElementById("f-address").value.trim();
+    const tier = Number(document.getElementById("f-tier").value);
+    if(!ethers.isAddress(memberAddress)){ log("Indirizzo non valido."); return; }
+
+    log(`Preparo metadata per tier ${TIER_NAMES[tier]}...`);
+    const metadataValue = await buildAndUploadMetadata(tier);
+
+    log("Invio mintMembership alla UP per la firma...");
+    const tx = await contract.mintMembership(memberAddress, tier, metadataValue);
+    log("Transazione inviata: " + tx.hash);
+    await tx.wait();
+    log(`✓ Fatto. Membership ${TIER_NAMES[tier]} mintata per ${memberAddress}.`);
+  }catch(err){
+    console.error(err);
+    log("✗ Errore: " + (err.message || err));
+  }
+});
+
+document.getElementById("btn-set-tier").addEventListener("click", async () => {
+  try{
+    const tokenIdNum = document.getElementById("f-token-id").value;
+    const newTier = Number(document.getElementById("f-new-tier").value);
+    if(!tokenIdNum){ log("Inserisci un token ID."); return; }
+
+    const tokenIdHex = toTokenIdHex(tokenIdNum);
+    log(`Token ID ${tokenIdNum} -> ${tokenIdHex}`);
+
+    log(`Preparo metadata per tier ${TIER_NAMES[newTier]}...`);
+    const metadataValue = await buildAndUploadMetadata(newTier);
+
+    log("Invio setTier alla UP per la firma...");
+    const tx = await contract.setTier(tokenIdHex, newTier, metadataValue);
+    log("Transazione inviata: " + tx.hash);
+    await tx.wait();
+    log(`✓ Fatto. Token ${tokenIdNum} aggiornato a ${TIER_NAMES[newTier]}.`);
+  }catch(err){
+    console.error(err);
+    log("✗ Errore: " + (err.message || err));
+  }
+});
+
+document.getElementById("btn-check-status").addEventListener("click", async () => {
+  try{
+    const memberAddress = document.getElementById("f-status-address").value.trim();
+    if(!ethers.isAddress(memberAddress)){ log("Indirizzo non valido."); return; }
+
+    const [exists, isSuspended, tier] = await contract.membershipStatus(memberAddress);
+    const tokenId = await contract.membershipTokenOf(memberAddress);
+    const resultEl = document.getElementById("status-result");
+
+    if(!exists){
+      resultEl.textContent = "Nessuna membership per questo indirizzo.";
+    } else {
+      const tokenIdNum = BigInt(tokenId).toString();
+      resultEl.textContent =
+        `Token ID: ${tokenIdNum} — Tier: ${TIER_NAMES[tier] || tier} — Stato: ${isSuspended ? "SOSPESA" : "attiva"}`;
+      document.getElementById("f-suspend-token-id").value = tokenIdNum;
+    }
+    log(`Verifica stato per ${memberAddress} completata.`);
+  }catch(err){
+    console.error(err);
+    log("✗ Errore: " + (err.message || err));
+  }
+});
+
+document.getElementById("btn-suspend").addEventListener("click", async () => {
+  try{
+    const tokenIdNum = document.getElementById("f-suspend-token-id").value;
+    if(!tokenIdNum){ log("Inserisci un token ID."); return; }
+    const tokenIdHex = toTokenIdHex(tokenIdNum);
+
+    log("Invio suspendMembership alla UP per la firma...");
+    const tx = await contract.suspendMembership(tokenIdHex);
+    log("Transazione inviata: " + tx.hash);
+    await tx.wait();
+    log(`✓ Fatto. Token ${tokenIdNum} sospeso.`);
+  }catch(err){
+    console.error(err);
+    log("✗ Errore: " + (err.message || err));
+  }
+});
+
+document.getElementById("btn-reactivate").addEventListener("click", async () => {
+  try{
+    const tokenIdNum = document.getElementById("f-suspend-token-id").value;
+    if(!tokenIdNum){ log("Inserisci un token ID."); return; }
+    const tokenIdHex = toTokenIdHex(tokenIdNum);
+
+    log("Invio reactivateMembership alla UP per la firma...");
+    const tx = await contract.reactivateMembership(tokenIdHex);
+    log("Transazione inviata: " + tx.hash);
+    await tx.wait();
+    log(`✓ Fatto. Token ${tokenIdNum} riattivato.`);
+  }catch(err){
+    console.error(err);
+    log("✗ Errore: " + (err.message || err));
+  }
+});
+</script>
+
+</body>
+</html>
