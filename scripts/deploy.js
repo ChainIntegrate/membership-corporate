@@ -23,12 +23,54 @@ async function main() {
   console.log("Collection owner (ChainIntegrate UP):", collectionOwner);
 
   const ChainIntegrateMembershipCorporate = await hre.ethers.getContractFactory("ChainIntegrateMembershipCorporate");
-  const contract = await ChainIntegrateMembershipCorporate.deploy(collectionOwner);
-  await contract.waitForDeployment();
+  // gasLimit esplicito: Blockscout (via /api/eth-rpc) non sa stimare il gas
+  // per una tx di creazione contratto (richiede sempre un `to`, che una
+  // deploy tx non ha) — bypassiamo eth_estimateGas del tutto.
+  const contract = await ChainIntegrateMembershipCorporate.deploy(collectionOwner, {
+  gasLimit: 4_000_000,
+  gasPrice: hre.ethers.parseUnits("3", "gwei")
+});
 
-  const address = await contract.getAddress();
+  const deployTx = contract.deploymentTransaction();
+  console.log("\nTransazione di deploy inviata:", deployTx.hash);
+  console.log(
+    "--> Se il polling qui sotto fallisce per ritardo di indicizzazione Blockscout, controlla a mano:\n" +
+    "    https://explorer.execution.testnet.lukso.network/tx/" + deployTx.hash + "\n"
+  );
+
+  const address = await waitForReceiptWithRetry(deployTx.hash, 20, 15000);
   console.log("\nChainIntegrateMembershipCorporate deployed at:", address);
   console.log("\n--> Copia questo indirizzo in frontend/config.js, chiave", chainId, "\n");
+}
+
+// Blockscout (esposto via /api/eth-rpc) a volte è indietro con l'indicizzazione:
+// eth_sendRawTransaction passa (va al nodo reale), ma eth_getTransactionReceipt
+// subito dopo può fallire con "Internal server error" finché il blocco non è
+// stato indicizzato. Stesso principio di resilienza già usato nell'oracolo di
+// MatchPredictor: retry + tolleranza ai singoli fallimenti, non ci si arrende
+// al primo errore RPC.
+async function waitForReceiptWithRetry(txHash, maxAttempts, delayMs) {
+  for (let attempt = 1; attempt <= maxAttempts; attempt++) {
+    try {
+      const receipt = await hre.ethers.provider.getTransactionReceipt(txHash);
+      if (receipt) {
+        if (receipt.status === 0) {
+          throw new Error(`Transazione fallita on-chain (status 0): ${txHash}`);
+        }
+        if (receipt.contractAddress) {
+          return receipt.contractAddress;
+        }
+      }
+      console.log(`Tentativo ${attempt}/${maxAttempts}: receipt non ancora disponibile, riprovo tra ${delayMs / 1000}s...`);
+    } catch (err) {
+      console.log(`Tentativo ${attempt}/${maxAttempts}: errore RPC (${err.message || err}), riprovo tra ${delayMs / 1000}s...`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, delayMs));
+  }
+  throw new Error(
+    `Receipt non ottenuta dopo ${maxAttempts} tentativi. La tx potrebbe comunque essere passata: ` +
+    `controlla manualmente su Blockscout con l'hash stampato sopra.`
+  );
 }
 
 main().catch((error) => {

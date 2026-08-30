@@ -145,7 +145,7 @@ async function imageEntry(file, filename){
 // Il badge di ogni tier è già sul server (bronze.png/silver.png/gold.png,
 // nella stessa cartella di admin.html) — non serve caricarlo ogni volta,
 // lo prendiamo direttamente da lì e lo pinniamo su Pinata al volo.
-const TIER_BADGE_FILE = { 1: "bronze.png", 2: "silver.png", 3: "gold.png" };
+const TIER_BADGE_FILE = { 1: "corporate_bronze.png", 2: "corporate_silver.png", 3: "corporate_gold.png" };
 
 async function fetchTierBadgeBlob(tierNumber){
   const filename = TIER_BADGE_FILE[tierNumber];

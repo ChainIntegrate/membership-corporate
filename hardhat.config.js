@@ -12,7 +12,7 @@ module.exports = {
   },
   networks: {
     luksoTestnet: {
-      url: "https://rpc.testnet.lukso.network",
+      url: "https://explorer.execution.testnet.lukso.network/api/eth-rpc",
       chainId: 4201,
       accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : []
     },
