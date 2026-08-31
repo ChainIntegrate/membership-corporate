@@ -110,7 +110,7 @@ import { ERC725 } from "https://esm.sh/@erc725/erc725.js@0.28.2";
 const logEl = document.getElementById("log");
 function log(msg){ logEl.textContent += "\n" + msg; logEl.scrollTop = logEl.scrollHeight; }
 
-let provider, signer, address, contract;
+let provider, signer, address, contract, readContract;
 
 const schema = [{
   name: "LSP4Metadata",
@@ -160,7 +160,7 @@ async function buildAndUploadMetadata(tierNumber){
   const metadataJson = {
     LSP4Metadata: {
       name: `ChainIntegrate Membership Corporate — ${TIER_NAMES[tierNumber]}`,
-      description: "IT: Badge membership corporate ChainIntegrate.\n\nEN: ChainIntegrate corporate membership badge.",
+      description: "EN: ChainIntegrate corporate membership badge.\n\nIT: Badge membership corporate ChainIntegrate.",
       links: [{ title: "Website", url: "https://chainintegrate.it" }],
       icon: [icon],
       images: [[icon]],
@@ -207,7 +207,23 @@ document.getElementById("btn-connect").addEventListener("click", async () => {
   }
 
   contract = new ethers.Contract(netConfig.contractAddress, MEMBERSHIP_ABI, signer);
-  const owner = await contract.owner();
+
+  // Letture separate dall'estensione: l'RPC interno del wallet può essere
+  // indietro rispetto alla chain reale (già capitato in fase di deploy),
+  // mentre l'endpoint eth-rpc di Blockscout si è dimostrato affidabile per
+  // le letture live (eth_call, eth_getCode) anche quando il suo indicizzatore
+  // interno è indietro su altre cose (receipt, explorer UI). Le scritture
+  // restano sull'estensione com'è giusto che sia (serve la firma reale).
+  const readProvider = new ethers.JsonRpcProvider(netConfig.rpcUrl.includes("eth-rpc")
+    ? netConfig.rpcUrl
+    : netConfig.explorer + "/api/eth-rpc");
+  readContract = new ethers.Contract(netConfig.contractAddress, MEMBERSHIP_ABI, readProvider);
+
+  // Debug: accessibili da DevTools console per controlli manuali rapidi
+  // (window.debug.readContract.supportsInterface('0x...'), ecc.)
+  window.debug = { provider, signer, contract, readContract, readProvider, address };
+
+  const owner = await readContract.owner();
 
   document.getElementById("status").textContent = `${address} (rete ${chainId})`;
   log(`Connesso: ${address}`);
@@ -247,7 +263,7 @@ document.getElementById("btn-set-collection-metadata").addEventListener("click",
     const metadataJson = {
       LSP4Metadata: {
         name: "ChainIntegrate Membership Corporate",
-        description: "IT: Membership corporate ChainIntegrate a livelli (Bronze/Silver/Gold), soulbound, sospendibile, valida su tutti i progetti dell'ecosistema.\n\nEN: Tiered ChainIntegrate corporate membership (Bronze/Silver/Gold), soulbound, suspendable, valid across all ecosystem projects.",
+        description: "EN: Tiered ChainIntegrate corporate membership (Bronze/Silver/Gold), soulbound, suspendable, valid across all ecosystem projects.\n\nIT: Membership corporate ChainIntegrate a livelli (Bronze/Silver/Gold), soulbound, sospendibile, valida su tutti i progetti dell'ecosistema.",
         links: [{ title: "Website", url: "https://chainintegrate.it" }],
         icon: [icon],
         images,
@@ -273,7 +289,7 @@ document.getElementById("btn-set-collection-metadata").addEventListener("click",
     }], schema);
 
     log("Invio setData alla UP per la firma...");
-    const tx = await contract.setData(encoded.keys[0], encoded.values[0]);
+    const tx = await contract.setData(encoded.keys[0], encoded.values[0], { gasLimit: 800_000 });
     log("Transazione inviata: " + tx.hash);
     await tx.wait();
     log("✓ Fatto. Metadata di collezione impostata.");
@@ -293,7 +309,7 @@ document.getElementById("btn-mint").addEventListener("click", async () => {
     const metadataValue = await buildAndUploadMetadata(tier);
 
     log("Invio mintMembership alla UP per la firma...");
-    const tx = await contract.mintMembership(memberAddress, tier, metadataValue);
+    const tx = await contract.mintMembership(memberAddress, tier, metadataValue, { gasLimit: 800_000 });
     log("Transazione inviata: " + tx.hash);
     await tx.wait();
     log(`✓ Fatto. Membership ${TIER_NAMES[tier]} mintata per ${memberAddress}.`);
@@ -316,7 +332,7 @@ document.getElementById("btn-set-tier").addEventListener("click", async () => {
     const metadataValue = await buildAndUploadMetadata(newTier);
 
     log("Invio setTier alla UP per la firma...");
-    const tx = await contract.setTier(tokenIdHex, newTier, metadataValue);
+    const tx = await contract.setTier(tokenIdHex, newTier, metadataValue, { gasLimit: 800_000 });
     log("Transazione inviata: " + tx.hash);
     await tx.wait();
     log(`✓ Fatto. Token ${tokenIdNum} aggiornato a ${TIER_NAMES[newTier]}.`);
@@ -331,8 +347,8 @@ document.getElementById("btn-check-status").addEventListener("click", async () =
     const memberAddress = document.getElementById("f-status-address").value.trim();
     if(!ethers.isAddress(memberAddress)){ log("Indirizzo non valido."); return; }
 
-    const [exists, isSuspended, tier] = await contract.membershipStatus(memberAddress);
-    const tokenId = await contract.membershipTokenOf(memberAddress);
+    const [exists, isSuspended, tier] = await readContract.membershipStatus(memberAddress);
+    const tokenId = await readContract.membershipTokenOf(memberAddress);
     const resultEl = document.getElementById("status-result");
 
     if(!exists){
@@ -357,7 +373,7 @@ document.getElementById("btn-suspend").addEventListener("click", async () => {
     const tokenIdHex = toTokenIdHex(tokenIdNum);
 
     log("Invio suspendMembership alla UP per la firma...");
-    const tx = await contract.suspendMembership(tokenIdHex);
+    const tx = await contract.suspendMembership(tokenIdHex, { gasLimit: 400_000 });
     log("Transazione inviata: " + tx.hash);
     await tx.wait();
     log(`✓ Fatto. Token ${tokenIdNum} sospeso.`);
@@ -374,7 +390,7 @@ document.getElementById("btn-reactivate").addEventListener("click", async () => 
     const tokenIdHex = toTokenIdHex(tokenIdNum);
 
     log("Invio reactivateMembership alla UP per la firma...");
-    const tx = await contract.reactivateMembership(tokenIdHex);
+    const tx = await contract.reactivateMembership(tokenIdHex, { gasLimit: 400_000 });
     log("Transazione inviata: " + tx.hash);
     await tx.wait();
     log(`✓ Fatto. Token ${tokenIdNum} riattivato.`);
