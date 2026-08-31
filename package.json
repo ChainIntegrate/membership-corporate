@@ -24,6 +24,7 @@
     "hardhat": "^2.29.0"
   },
   "dependencies": {
+    "@erc725/erc725.js": "^0.28.2",
     "@lukso/lsp4-contracts": "^0.17.3",
     "@lukso/lsp8-contracts": "^0.18.1"
   }
