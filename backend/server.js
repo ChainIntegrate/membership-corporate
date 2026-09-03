@@ -92,6 +92,7 @@ app.post("/api/pin-file", upload.single("image"), async (req, res) => {
   }
 });
 
+
 app.get("/api/health", (req, res) => res.json({ ok: true }));
 
 // Proxy verso il nodo LUKSO mainnet privato (Contabo, rpc.chainintegrate.it).
@@ -106,13 +107,11 @@ app.post("/api/rpc", async (req, res) => {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(req.body)
     });
-
     if (!response.ok) {
       const errText = await response.text();
       console.error("Errore nodo RPC:", response.status, errText);
       return res.status(502).json({ error: "Il nodo RPC ha rifiutato la richiesta." });
     }
-
     const data = await response.json();
     return res.json(data);
   } catch (err) {
@@ -121,6 +120,6 @@ app.post("/api/rpc", async (req, res) => {
   }
 });
 
-app.listen(PORT, () => {
+app.listen(PORT, '127.0.0.1', () => {
   console.log(`ci-membership-backend in ascolto sulla porta ${PORT}`);
 });
