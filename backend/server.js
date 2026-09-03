@@ -7,9 +7,14 @@ const app = express();
 const PORT = process.env.PORT || 3010;
 const PINATA_JWT = process.env.PINATA_JWT;
 const ALLOWED_ORIGIN = process.env.ALLOWED_ORIGIN || "https://membership-corporate.chainintegrate.it";
+const CHAININTEGRATE_RPC_URL = process.env.CHAININTEGRATE_RPC_URL;
 
 if (!PINATA_JWT) {
   console.error("PINATA_JWT mancante in .env — il backend non può avviarsi senza.");
+  process.exit(1);
+}
+if (!CHAININTEGRATE_RPC_URL) {
+  console.error("CHAININTEGRATE_RPC_URL mancante in .env — il backend non può avviarsi senza.");
   process.exit(1);
 }
 
@@ -88,6 +93,33 @@ app.post("/api/pin-file", upload.single("image"), async (req, res) => {
 });
 
 app.get("/api/health", (req, res) => res.json({ ok: true }));
+
+// Proxy verso il nodo LUKSO mainnet privato (Contabo, rpc.chainintegrate.it).
+// La chiave API resta solo qui, mai nel browser — stesso principio del
+// proxy Pinata sopra. Solo mainnet: la testnet non ha un nodo privato
+// dedicato, admin.html continua a usare Blockscout direttamente per quella
+// (nessun segreto coinvolto lì, è un endpoint pubblico).
+app.post("/api/rpc", async (req, res) => {
+  try {
+    const response = await fetch(CHAININTEGRATE_RPC_URL, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(req.body)
+    });
+
+    if (!response.ok) {
+      const errText = await response.text();
+      console.error("Errore nodo RPC:", response.status, errText);
+      return res.status(502).json({ error: "Il nodo RPC ha rifiutato la richiesta." });
+    }
+
+    const data = await response.json();
+    return res.json(data);
+  } catch (err) {
+    console.error("Errore proxy RPC:", err);
+    return res.status(500).json({ error: "Errore interno nel proxy RPC." });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`ci-membership-backend in ascolto sulla porta ${PORT}`);

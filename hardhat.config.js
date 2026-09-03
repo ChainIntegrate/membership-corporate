@@ -1,7 +1,7 @@
 require("@nomicfoundation/hardhat-toolbox");
 require("dotenv").config();
 
-const { DEPLOYER_PRIVATE_KEY } = process.env;
+const { DEPLOYER_PRIVATE_KEY, CHAININTEGRATE_RPC_URL } = process.env;
 
 module.exports = {
   solidity: {
@@ -17,7 +17,9 @@ module.exports = {
       accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : []
     },
     luksoMainnet: {
-      url: "https://rpc.mainnet.lukso.network",
+      // Nodo privato ChainIntegrate (Contabo), non l'RPC pubblico —
+      // vedi backend/.env.example per dove impostare CHAININTEGRATE_RPC_URL.
+      url: CHAININTEGRATE_RPC_URL || "https://rpc.mainnet.lukso.network",
       chainId: 42,
       accounts: DEPLOYER_PRIVATE_KEY ? [DEPLOYER_PRIVATE_KEY] : []
     }

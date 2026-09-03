@@ -193,6 +193,19 @@ document.getElementById("btn-connect").addEventListener("click", async () => {
   const injected = window.lukso || window.ethereum;
   if(!injected){ log("Nessuna UP rilevata."); return; }
 
+  // Se l'estensione cambia rete DOPO la connessione (es. testnet -> mainnet
+  // a metà operazione), contract/netConfig restano quelli vecchi e le
+  // transazioni falliscono in modo confuso ("internal error" generico).
+  // Blocchiamo tutto finché non si riconnette esplicitamente.
+  if(!injected._membershipChainListenerAttached && injected.on){
+    injected.on("chainChanged", () => {
+      log("⚠️ Rete cambiata nell'estensione — ricarica la pagina e riconnetti prima di procedere.");
+      ["btn-mint","btn-set-tier","btn-set-collection-metadata","btn-check-status","btn-suspend","btn-reactivate"]
+        .forEach(id => document.getElementById(id).disabled = true);
+    });
+    injected._membershipChainListenerAttached = true;
+  }
+
   provider = new ethers.BrowserProvider(injected);
   await injected.request({ method: "eth_requestAccounts" });
   signer = await provider.getSigner();
@@ -209,14 +222,16 @@ document.getElementById("btn-connect").addEventListener("click", async () => {
   contract = new ethers.Contract(netConfig.contractAddress, MEMBERSHIP_ABI, signer);
 
   // Letture separate dall'estensione: l'RPC interno del wallet può essere
-  // indietro rispetto alla chain reale (già capitato in fase di deploy),
-  // mentre l'endpoint eth-rpc di Blockscout si è dimostrato affidabile per
-  // le letture live (eth_call, eth_getCode) anche quando il suo indicizzatore
-  // interno è indietro su altre cose (receipt, explorer UI). Le scritture
-  // restano sull'estensione com'è giusto che sia (serve la firma reale).
-  const readProvider = new ethers.JsonRpcProvider(netConfig.rpcUrl.includes("eth-rpc")
-    ? netConfig.rpcUrl
-    : netConfig.explorer + "/api/eth-rpc");
+  // indietro rispetto alla chain reale (già capitato in fase di deploy).
+  // Su mainnet passiamo dal nodo privato ChainIntegrate, ma MAI
+  // direttamente dal browser (la chiave finirebbe visibile a chiunque
+  // apra la pagina) — si passa dal backend, che tiene la chiave solo lato
+  // server (stesso principio del proxy Pinata). Su testnet, dove non
+  // abbiamo un nodo dedicato, si resta su Blockscout diretto: nessun
+  // segreto in gioco lì, è un endpoint pubblico.
+  const readProvider = chainId === 42
+    ? new ethers.JsonRpcProvider(`${window.location.origin}/api/rpc`)
+    : new ethers.JsonRpcProvider(netConfig.explorer + "/api/eth-rpc");
   readContract = new ethers.Contract(netConfig.contractAddress, MEMBERSHIP_ABI, readProvider);
 
   // Debug: accessibili da DevTools console per controlli manuali rapidi
