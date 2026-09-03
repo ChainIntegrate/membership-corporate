@@ -14,7 +14,11 @@ chainintegrate-membership-corporate/
 ├── contracts/
 │   └── ChainIntegrateMembershipCorporate.sol
 ├── scripts/
-│   └── deploy.js
+│   ├── deploy.js               — deploy testnet (usato e verificato)
+│   ├── deployMainnet.js        — deploy mainnet (usato e verificato)
+│   ├── testViaUP.js            — test minimo di scrittura via UP, bypassa l'estensione
+│   ├── mintViaUP.js            — mint completo via UP, bypassa l'estensione
+│   └── testSuspendReactivate.js — verifica end-to-end sospendi/riattiva
 ├── backend/
 │   ├── server.js      — proxy Pinata (mai JWT nel browser)
 │   ├── package.json
@@ -23,6 +27,8 @@ chainintegrate-membership-corporate/
 │   ├── admin.html      — mint + tier + sospensione/riattivazione (solo owner contratto)
 │   └── config.js        — indirizzi contratto per rete + ABI
 ├── hardhat.config.js
+├── TESTNET-DEBUG-LOG.md — cronologia completa dei problemi infrastrutturali
+│   incontrati durante deploy/test su testnet (nessuno nel contratto)
 └── .env.example
 ```
 
@@ -49,22 +55,19 @@ chainintegrate-membership-corporate/
   stop non si aggira ri-mintando.
 - **Mint, upgrade, sospensione e riattivazione: solo owner del contratto**
   (ChainIntegrate) — gestione manuale, come nel repo private.
+- **Un contratto appena deployato può dare problemi di stima del gas
+  nell'estensione UP** nei primi utilizzi (sottostima sistematica,
+  indipendente dal peso dell'operazione) — non è un bug del contratto.
+  Gli script `testViaUP.js`/`mintViaUP.js` bypassano l'estensione con
+  `gasLimit` esplicito per i primi test su un indirizzo nuovo. Dettagli
+  completi in `TESTNET-DEBUG-LOG.md`.
 
-## TODO prima del deploy
+## Stato del deploy
 
-1. Confermare gli indirizzi owner in `scripts/deploy.js`
-   (`COLLECTION_OWNER_BY_CHAIN`) — riusati quelli del repo private,
-   assumendo la stessa UP ChainIntegrate; verificare che sia corretto.
-2. Decidere il sottodominio (proposto: `membership-corporate.chainintegrate.it`)
-   e aggiornare `ALLOWED_ORIGIN` in `backend/.env.example` di conseguenza.
-3. `npx hardhat compile` — non verificato in sandbox (nessun accesso a
-   binaries.soliditylang.org), solo revisione manuale finora.
-4. Deploy su testnet 4201 prima, verifica mint+upgrade+sospendi+riattiva,
-   poi mainnet 42.
-5. Collegare il JWT Pinata (stesso account già in uso per gli altri
-   progetti, o uno dedicato — a scelta). Backend gira su porta diversa
-   (3010) dal repo private (3009) per poter stare sullo stesso VPS senza
-   collisioni.
+- **Testnet (4201)**: `0x08EA03294d6A27f4f819f0136d13fc5046175840` — verificato su Blockscout, mint/upgrade/downgrade/sospensione/riattivazione tutti testati con successo (vedi `TESTNET-DEBUG-LOG.md` per la cronologia dei problemi infrastrutturali incontrati, nessuno nel contratto).
+- **Mainnet (42)**: `0x18BaFeD9B151Fb29b3cFEa35A3197F4830072a3e` — verificato su Blockscout, visibile su universaleverything.io.
+- **Sottodominio**: `membership-corporate.chainintegrate.it`, su Aruba VPS (`31.14.140.170`), Nginx + Let's Encrypt.
+- **Backend**: porta 3013 (3010/3011/3012 già occupate da altri servizi sullo stesso VPS), proxy Pinata via PM2 (`membership-corporate-backend`).
 
 ## Non ancora implementato (di proposito)
 
